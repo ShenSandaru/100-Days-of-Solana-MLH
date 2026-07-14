@@ -1,23 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
+import transactionLogic from "./transactionlogic.js";
 import {
 	address,
 	createKeyPairSignerFromBytes,
 	createSolanaRpc,
 	createSolanaRpcSubscriptions,
-	pipe,
-	createTransactionMessage,
-	setTransactionMessageFeePayerSigner,
-	setTransactionMessageLifetimeUsingBlockhash,
-	appendTransactionMessageInstruction,
-	signTransactionMessageWithSigners,
-	getSignatureFromTransaction,
-	sendAndConfirmTransactionFactory,
 	lamports,
 	devnet,
 } from "@solana/kit";
-import { getTransferSolInstruction } from "@solana-program/system";
+
+const { transferWithConfirmation } = transactionLogic;
 
 // --- Configuration ---
 const RPC_URL = devnet("https://api.devnet.solana.com");
@@ -79,42 +73,34 @@ async function main() {
 		console.error("Get more devnet SOL at https://faucet.solana.com/");
 		process.exit(1);
 	}
+	try {
+		const signature = await transferWithConfirmation(
+		rpc,
+		sender,
+		recipientAddress,
+		solAmount,
+		statusUpdate
+		);
+		console.log("Transaction successful!");
+		console.log(`Signature: ${signature}`);
+		console.log(`View on Solana Explorer:`);
+		console.log(`https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+		console.log("Transaction confirmed!\n");
+		console.log("Signature:", signature);
+		console.log(`Explorer:  https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+	} catch (error) {
+		console.error("\nTransaction failed:");
+		console.error(error.message);
+		process.exit(1);
+	}
 
-	// 4. Build the transaction
-	const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
 
-	const transactionMessage = pipe(
-		createTransactionMessage({ version: 0 }),
-		(tx) => setTransactionMessageFeePayerSigner(sender, tx),
-		(tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
-		(tx) =>
-			appendTransactionMessageInstruction(
-				getTransferSolInstruction({
-					source: sender,
-					destination: recipientAddress,
-					amount: transferLamports,
-				}),
-				tx
-			)
-	);
+}
 
-	// 5. Sign the transaction
-	const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);
-	const signature = getSignatureFromTransaction(signedTransaction);
-
-	// 6. Send and confirm
-	console.log("\nSending transaction...");
-	const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
-	await sendAndConfirm(signedTransaction, { commitment: "confirmed" });
-
-	console.log("Transaction confirmed!\n");
-	console.log("Signature:", signature);
-	console.log(`Explorer:  https://explorer.solana.com/tx/${signature}?cluster=devnet`);
-
-	// 7. Show updated balance
-	const { value: newBalance } = await rpc.getBalance(sender.address).send();
-	const newBalanceInSol = Number(newBalance) / Number(LAMPORTS_PER_SOL);
-	console.log(`\nNew sender balance: ${newBalanceInSol} SOL`);
+function statusUpdate(message) {
+	process.stdout.clearLine(0);
+	process.stdout.cursorTo(0);
+	process.stdout.write(message);
 }
 
 main().catch((err) => {
